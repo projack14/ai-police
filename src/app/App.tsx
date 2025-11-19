@@ -9,198 +9,261 @@ import { VoiceWave } from './Voice';
 type Chat = { sender: 'user' | 'ai'; message: string };
 
 export default function VoiceTextAI(): React.ReactElement {
-  const [listening, setListening] = useState<boolean>(false);
-  const [transcript, setTranscript] = useState<string>('');
+  const [listening, setListening] = useState(false);
+  const [muted, setMuted] = useState(false);
   const [history, setHistory] = useState<Chat[]>([]);
-  const [connected, setConnected] = useState<boolean>(false);
-  const [isAiTalking, setIsAiTalking] = useState<boolean>(false);
+  const [connected, setConnected] = useState(false);
+  const [isAiTalking, setIsAiTalking] = useState(false);
 
   const recognitionRef = useRef<any>(null);
+  const canRestartRecognition = useRef(true);
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
+  const vadRef = useRef<any>(null);
 
   const speakAI = (text: string) => {
+    if (muted) return;
+
     if (!('speechSynthesis' in window)) return;
 
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'id-ID';
     utterance.rate = 1.0;
 
     utterance.onstart = () => {
       setIsAiTalking(true);
+
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+
       if (avatarVideoRef.current) {
-        avatarVideoRef.current.play().catch(e => console.log('Video play error:', e));
+        avatarVideoRef.current.play().catch(() => {});
       }
     };
 
     utterance.onend = () => {
       setIsAiTalking(false);
+
+      if (!muted && connected && canRestartRecognition.current) {
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+          } catch {}
+        }, 200);
+      }
     };
 
     window.speechSynthesis.speak(utterance);
 
     setHistory(prev => [...prev, { sender: 'ai', message: text }]);
+    prev => [...prev, { sender: 'ai', message: text }];
   };
 
   const simulateAIResponse = (userText: string) => {
+    if (muted) return;
+
     setTimeout(() => {
       const responses = [
-        `Kamu berkata: "${userText}". Mode simulasi aktif.`,
-        'Tampilan video sudah berfungsi! Mulut saya bergerak, kan?',
-        'Ini adalah respon acak. Sekarang giliranmu bicara lagi.',
-        'Aku tidak bisa memproses pertanyaan kompleks di mode ini.',
+        `Kamu berkata: "${userText}".`,
+        'Aku mendengarkanmu.',
+        'Silakan lanjut.',
+        'Oke, aku paham.',
       ];
-      const randomRes = responses[Math.floor(Math.random() * responses.length)];
-      speakAI(randomRes);
-    }, 1000);
+      const r = responses[Math.floor(Math.random() * responses.length)];
+      speakAI(r);
+    }, 800);
   };
 
-  const vad: any = useMicVAD({
+  const vad = useMicVAD({
+    enabled: connected && !muted,
     getStream: async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const s = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
           echoCancellation: true,
-          autoGainControl: true,
           noiseSuppression: true,
+          autoGainControl: true,
         },
       });
-      return stream;
+      return s;
     },
     onSpeechStart: () => {
+      if (muted) return;
+      canRestartRecognition.current = false;
       if (window.speechSynthesis.speaking) {
         window.speechSynthesis.cancel();
         setIsAiTalking(false);
       }
-    },
-    onSpeechEnd: () => {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
         } catch (e) {}
-        setTimeout(() => {
+      }
+    },
+    onSpeechEnd: () => {
+      if (muted) return;
+      setTimeout(() => {
+        canRestartRecognition.current = true;
+        if (!window.speechSynthesis.speaking && recognitionRef.current) {
           try {
             recognitionRef.current.start();
           } catch (e) {}
-        }, 120);
-      }
+        }
+      }, 150);
     },
-  });
+  } as any);
 
   useEffect(() => {
-    const SpeechRecognition: any =
+    vadRef.current = vad;
+  }, [vad]);
+
+  useEffect(() => {
+    const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
 
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = 'id-ID';
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = 'id-ID';
 
-      rec.onstart = () => setListening(true);
-      rec.onend = () => setListening(false);
+    rec.onstart = () => setListening(true);
+    rec.onend = () => {
+      setListening(false);
+      if (
+        !muted &&
+        connected &&
+        !window.speechSynthesis.speaking &&
+        canRestartRecognition.current
+      ) {
+        setTimeout(() => {
+          try {
+            rec.start();
+          } catch (e) {}
+        }, 200);
+      }
+    };
 
-      rec.onresult = (ev: any) => {
-        let text = '';
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          text += ev.results[i][0].transcript;
-        }
-        setTranscript(text);
-        setHistory(prev => [...prev, { sender: 'user', message: text }]);
-        simulateAIResponse(text);
-      };
+    rec.onresult = (ev: any) => {
+      if (muted) return;
+      let text = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        text += ev.results[i][0].transcript;
+      }
+      if (!text) return;
+      setHistory(prev => [...prev, { sender: 'user', message: text }]);
+      simulateAIResponse(text);
+    };
 
-      rec.onerror = (e: any) => {
-        console.error('Speech error:', e);
-        setListening(false);
-      };
+    recognitionRef.current = rec;
 
-      recognitionRef.current = rec;
-    }
-  }, []);
+    return () => {
+      try {
+        rec.onresult = null;
+        rec.onend = null;
+        rec.onstart = null;
+      } catch (e) {}
+    };
+  }, [connected, muted]);
 
-  const handleStart = () => setConnected(true);
-  const handleStop = () => setConnected(false);
-
-  const handleSendClick = () => {
-    if (!transcript.trim()) return;
-    setHistory(prev => [...prev, { sender: 'user', message: transcript }]);
-    simulateAIResponse(transcript);
-    setTranscript('');
+  const handleStart = () => {
+    setConnected(true);
+    setTimeout(() => {
+      if (!muted && recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+        } catch (e) {}
+      }
+    }, 300);
   };
 
-  const handleMicToggle = () => {
-    const rec = recognitionRef.current;
-    if (!rec) return;
-
-    if (isAiTalking) {
-      window.speechSynthesis.cancel();
-      setIsAiTalking(false);
+  const handleStop = () => {
+    setConnected(false);
+    if (recognitionRef.current)
       try {
-        rec.start();
+        recognitionRef.current.stop();
       } catch (e) {}
-      return;
-    }
-
-    if (listening) {
-      try {
-        rec.stop();
-      } catch (e) {}
-    } else {
-      try {
-        rec.stop();
-        rec.start();
-      } catch (e) {}
-    }
+    window.speechSynthesis.cancel();
+    setIsAiTalking(false);
+    try {
+      const s = vadRef.current?.mediaStream || vadRef.current?.stream || null;
+      if (s && s.getTracks) s.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+    } catch (e) {}
   };
 
+  const toggleMute = () => {
+    setMuted(prev => {
+      const next = !prev;
+
+      if (next) {
+        if (recognitionRef.current)
+          try {
+            recognitionRef.current.stop();
+          } catch (e) {}
+        setIsAiTalking(false);
+        try {
+          const s = vadRef.current?.mediaStream || vadRef.current?.stream || null;
+          if (s && s.getTracks) s.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+        } catch (e) {}
+      } else {
+        setTimeout(() => {
+          if (connected && recognitionRef.current)
+            try {
+              recognitionRef.current.start();
+            } catch (e) {}
+        }, 300);
+      }
+
+      return next;
+    });
+  };
+
+  // ---------------------- UI ----------------------
   return (
     <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
       <div className="w-full max-w-sm h-[90vh] bg-gray-800 rounded-[2.5rem] shadow-2xl overflow-hidden relative">
-        <div className="absolute inset-0 z-0 bg-black">
-          <video
-            ref={avatarVideoRef}
-            key={isAiTalking ? 'talking' : 'idle'}
-            src={isAiTalking ? talkingVideo : idleVideo}
-            autoPlay
-            loop
-            muted
-            playsInline
-            className="w-full h-full object-cover opacity-90"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none"></div>
-        </div>
-
-        <audio id="audio" />
+        <video
+          ref={avatarVideoRef}
+          key={isAiTalking ? 'talk' : 'idle'}
+          src={isAiTalking ? talkingVideo : idleVideo}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute inset-0 w-full h-full object-cover opacity-90"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-black/20" />
 
         <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-30">
-          <div className="bg-blue-500/80 text-white text-xs px-3 py-1 rounded-full flex items-center shadow-lg backdrop-blur-sm">
+          <div className="bg-blue-600/80 text-white text-xs px-3 py-1 rounded-full flex items-center">
             <span
               className={`w-2 h-2 rounded-full ${
                 connected ? 'bg-green-400' : 'bg-red-400'
               } animate-pulse`}
             />
-            <span className="ml-2">{connected ? 'Online (Simulasi)' : 'Offline'}</span>
+            <span className="ml-2">
+              {connected ? (muted ? 'Online (Muted)' : 'Online (Listening)') : 'Offline'}
+            </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={connected ? handleStop : handleStart}
-              className={`${
-                connected ? 'bg-red-500' : 'bg-green-500'
-              } px-4 py-1 rounded-full text-white text-xs font-medium shadow-lg hover:brightness-110 transition-all`}
-            >
-              {connected ? 'Stop' : 'Start'}
-            </button>
-          </div>
+          <button
+            onClick={connected ? handleStop : handleStart}
+            className={`${
+              connected ? 'bg-red-500' : 'bg-green-500'
+            } px-4 py-1 rounded-full text-white text-xs shadow-lg`}
+          >
+            {connected ? 'Stop' : 'Start'}
+          </button>
         </div>
 
-        {listening && <VoiceWave />}
+        {!muted && listening && <VoiceWave />}
 
-        {vad.userSpeaking && (
+        {!muted && vad.userSpeaking && (
           <div className="absolute bottom-36 w-full text-center z-50">
-            <span className="bg-black/60 text-white px-4 py-1 rounded-full text-xs backdrop-blur-md border border-white/10">
+            <span className="bg-black/60 text-white px-4 py-1 rounded-full text-xs">
               Mendengarkan...
             </span>
           </div>
@@ -208,31 +271,11 @@ export default function VoiceTextAI(): React.ReactElement {
 
         <FullHistoryDisplay history={history} />
 
-        <div className="absolute bottom-0 left-0 w-full p-6 z-30 flex flex-col items-center">
-          {!listening && !isAiTalking && (
-            <div className="flex gap-2 mb-4 overflow-x-auto w-full justify-center pb-2">
-              {['Apa kabar?', 'Siapa kamu?', 'Nyanyi dong!'].map(s => (
-                <button
-                  key={s}
-                  className="px-4 py-2 text-xs bg-white/10 hover:bg-white/20 text-white rounded-full border border-white/5 transition-all whitespace-nowrap backdrop-blur-sm"
-                  onClick={() => {
-                    setTranscript(s);
-                    simulateAIResponse(s);
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-
+        <div className="absolute bottom-0 w-full p-6 z-30 flex justify-center">
           <button
-            onClick={handleMicToggle}
-            disabled={isAiTalking && !listening}
+            onClick={toggleMute}
             className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all ${
-              listening
-                ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] scale-110'
-                : 'bg-blue-600 hover:bg-blue-500'
+              muted ? 'bg-gray-500' : 'bg-blue-600 hover:bg-blue-500'
             }`}
           >
             <svg
