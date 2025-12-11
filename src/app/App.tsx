@@ -15,6 +15,8 @@ declare global {
     slotSessionId: number;
     dbSessionId: string;
     startConnection?: any;
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
   }
 }
 
@@ -72,6 +74,27 @@ export default function VoiceTextAI(): React.ReactElement {
   const speakAI = (text: string) => {
     window.speechSynthesis.cancel();
     setHistory(prev => [...prev, { sender: 'ai', message: text }]);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    utterance.onstart = () => {
+      recognitionRef.current?.stop();
+    };
+
+    utterance.onend = () => {
+      setTimeout(() => {
+        if (connected && !muted) {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            console.error('Error starting recognition after AI speak:', e);
+          }
+        }
+      }, 500);
+    };
+    // **********************************
+
+    window.speechSynthesis.speak(utterance);
   };
 
   // ============================
@@ -92,9 +115,10 @@ export default function VoiceTextAI(): React.ReactElement {
       });
 
       const data = await res.json();
-      const reply = data.msg || 'Tidak ada respons dari server';
+      console.log(data);
+      // const reply = data.msg || 'Tidak ada respons dari server';
 
-      speakAI(reply);
+      // speakAI(reply);
     } catch (err) {
       speakAI('Maaf, aku mengalami gangguan.');
     }
@@ -115,9 +139,12 @@ export default function VoiceTextAI(): React.ReactElement {
     onSpeechEnd: () => {
       setTimeout(() => {
         canRestartRecognition.current = true;
+        // **********************************
+        // MODIFIKASI: Cek apakah AI sedang berbicara
         if (!window.speechSynthesis.speaking) {
           recognitionRef.current?.start();
         }
+        // **********************************
       }, 150);
     },
   });
@@ -142,7 +169,13 @@ export default function VoiceTextAI(): React.ReactElement {
 
     rec.onend = () => {
       setListening(false);
-      if (connected && !muted && canRestartRecognition.current) {
+
+      if (
+        !window.speechSynthesis.speaking &&
+        connected &&
+        !muted &&
+        canRestartRecognition.current
+      ) {
         setTimeout(() => rec.start(), 200);
       }
     };
@@ -184,21 +217,25 @@ export default function VoiceTextAI(): React.ReactElement {
       srsRef.current = sdk;
 
       const video = avatarVideoRef.current;
-      video.srcObject = sdk.stream;
-      video.muted = false;
+      if (video) {
+        video.srcObject = sdk.stream;
+        video.muted = false;
 
-      await sdk.play('https://live.divtik.xyz/whep/');
-      await video.play().catch(() => {});
+        await sdk.play('https://live.divtik.xyz/whep/');
+        await video.play().catch(() => {});
+      }
     } catch (err) {
       setConnected(false);
       return;
     }
 
-    setTimeout(() => {
-      try {
-        recognitionRef.current?.start();
-      } catch {}
-    }, 400);
+    if (!muted) {
+      setTimeout(() => {
+        try {
+          recognitionRef.current?.start();
+        } catch {}
+      }, 400);
+    }
   };
 
   // =======================
@@ -259,8 +296,10 @@ export default function VoiceTextAI(): React.ReactElement {
 
     const doc = new jsPDF();
     doc.setFontSize(12);
+    const splitText = doc.splitTextToSize(sessionSummary, 180);
+
     doc.text('Session Summary:', 10, 10);
-    doc.text(sessionSummary, 10, 20);
+    doc.text(splitText, 10, 20);
     doc.save('summary.pdf');
   };
 
@@ -271,7 +310,9 @@ export default function VoiceTextAI(): React.ReactElement {
         recognitionRef.current?.stop();
         window.speechSynthesis.cancel();
       } else {
-        setTimeout(() => recognitionRef.current?.start(), 400);
+        if (!window.speechSynthesis.speaking) {
+          setTimeout(() => recognitionRef.current?.start(), 400);
+        }
       }
       return next;
     });
@@ -290,12 +331,11 @@ export default function VoiceTextAI(): React.ReactElement {
           src={!connected ? standby : ''}
           autoPlay
           loop
-          muted
+          muted={!connected} // Muted saat standby
           playsInline
           className="absolute inset-0 w-full h-full object-cover opacity-90"
         />
 
-        {/* TOP BAR */}
         {/* TOP BAR */}
         <div className="absolute top-0 left-0 w-full p-5 flex justify-between items-center z-40">
           <div className="bg-blue-600/80 text-white px-3 py-1 rounded-full text-xs">
@@ -333,6 +373,17 @@ export default function VoiceTextAI(): React.ReactElement {
             </span>
           </div>
         )}
+
+        {/* CHAT HISTORY OVERLAY (Opsional: Jika ingin menampilkan chat) */}
+        {/* <div className="absolute bottom-24 w-full p-4 max-h-40 overflow-y-auto z-40">
+          {_history.map((chat, index) => (
+            <div key={index} className={`text-sm my-1 ${chat.sender === 'user' ? 'text-right' : 'text-left'}`}>
+              <span className={`px-2 py-1 rounded-lg ${chat.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-black'}`}>
+                {chat.message}
+              </span>
+            </div>
+          ))}
+        </div> */}
 
         {/* MUTE BUTTON */}
         <div className="absolute bottom-0 w-full p-6 flex justify-center z-40">
