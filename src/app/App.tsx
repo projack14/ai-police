@@ -305,7 +305,7 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   return (
     <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
-      <div className="w-full max-w-sm h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+      <div className="w-full max-w-lg h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
         <video
           ref={avatarVideoRef}
           src={!connected ? standby : ''}
@@ -313,7 +313,7 @@ export default function VoiceTextAI(): React.ReactElement {
           loop
           muted={false}
           playsInline
-          className="absolute inset-0 w-full h-full object-cover opacity-90"
+          className="absolute inset-0 w-full  object-cover opacity-90"
         />
 
         <div className="absolute top-0 left-0 w-full p-5 flex justify-between items-center z-40">
