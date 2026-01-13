@@ -7,7 +7,6 @@ import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 import { jsPDF } from 'jspdf';
 import { FullHistoryDisplay } from './History';
-
 type Chat = { sender: 'user' | 'ai'; message: string };
 
 declare global {
@@ -305,7 +304,7 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   return (
     <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
-      <div className="w-full max-w-lg h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+      <div className="w-full max-w-xl h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
         <video
           ref={avatarVideoRef}
           src={!connected ? standby : ''}
@@ -313,7 +312,7 @@ export default function VoiceTextAI(): React.ReactElement {
           loop
           muted={false}
           playsInline
-          className="absolute inset-0 w-full  object-cover opacity-90"
+          className="absolute inset-0 w-full h-full object-cover opacity-90"
         />
 
         <div className="absolute top-0 left-0 w-full p-5 flex justify-between items-center z-40">
@@ -397,6 +396,13 @@ export default function VoiceTextAI(): React.ReactElement {
                 <line x1="8" y1="23" x2="16" y2="23"></line>
               </svg>
             )}
+          </button>
+          <button
+            onClick={() => {
+              throw new Error('errro baru lagi menggunakan env!');
+            }}
+          >
+            Break the world
           </button>
         </div>
       </div>
