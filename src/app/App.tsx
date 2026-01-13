@@ -23,6 +23,7 @@ export default function VoiceTextAI(): React.ReactElement {
   const [muted, setMuted] = useState<any>(false);
   const [history, setHistory] = useState<Chat[]>([]);
   const [connected, setConnected] = useState<any>(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const [slotSessionId, setSlotSessionId] = useState<number | null>(null);
   const [dbSessionId, setDbSessionId] = useState<string | null>(null);
@@ -65,6 +66,28 @@ export default function VoiceTextAI(): React.ReactElement {
 
   useEffect(() => {
     checkSessionFromWindow();
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (err) {
+      console.error('Fullscreen error:', err);
+    }
+  };
+
+  useEffect(() => {
+    const handler = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
   //------------------------------------------------------
@@ -304,7 +327,10 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   return (
     <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
-      <div className="w-full max-w-xl h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+      <div
+        className={`relative bg-gray-800 overflow-hidden shadow-2xl transition-all duration-300
+  ${isFullscreen ? 'w-screen h-screen rounded-none' : 'w-full max-w-xl h-[90vh] rounded-[2.5rem]'}`}
+      >
         <video
           ref={avatarVideoRef}
           src={!connected ? standby : ''}
@@ -329,7 +355,12 @@ export default function VoiceTextAI(): React.ReactElement {
             >
               {connected ? 'Stop' : 'Start'}
             </button>
-
+            <button
+              onClick={toggleFullscreen}
+              className="px-3 py-1 rounded-full text-white text-xs bg-black/60 hover:bg-black/80"
+            >
+              {isFullscreen ? 'Exit Full' : 'Full Screen'}
+            </button>
             {sessionSummary && (
               <button
                 onClick={() => setShowModal(true)}
