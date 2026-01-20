@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-// import { useMicVAD } from '@ricky0123/vad-react';
+import { useMicVAD } from '@ricky0123/vad-react';
 
 import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
@@ -29,52 +29,13 @@ export default function VoiceTextAI(): React.ReactElement {
   const [dbSessionId, setDbSessionId] = useState<string | null>(null);
   const [sessionSummary, setSessionSummary] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [pttActive, setPttActive] = useState(false);
 
   const recognitionRef = useRef<any>(null);
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const ttsPlayingRef = useRef(false);
-  const lastTtsEndRef = useRef<number>(0);
   const srsRef = useRef<any>(null);
-  const audioMonitorRef = useRef<{
-    ctx?: AudioContext;
-    analyser?: AnalyserNode;
-    srcNode?: MediaStreamAudioSourceNode | MediaElementAudioSourceNode;
-    raf?: number;
-  } | null>(null);
   const canRestartRecognition = useRef(true);
   const vadRef = useRef<any>(null);
-
-  const muteMic = () => {
-    try {
-      micStreamRef.current?.getAudioTracks()?.forEach(t => (t.enabled = false));
-    } catch {}
-  };
-
-  const unmuteMic = () => {
-    if (muted) return; // respect user mute
-    try {
-      micStreamRef.current?.getAudioTracks()?.forEach(t => (t.enabled = true));
-    } catch {}
-  };
-
-  const enableMic = () => {
-    setPttActive(true);
-    try {
-      micStreamRef.current?.getAudioTracks().forEach(t => (t.enabled = true));
-      recognitionRef.current?.start();
-    } catch {}
-  };
-
-  const disableMic = () => {
-    setPttActive(false);
-    try {
-      micStreamRef.current?.getAudioTracks().forEach(t => (t.enabled = false));
-      recognitionRef.current?.stop();
-    } catch {}
-  };
 
   //------------------------------------------------------
   // CEK SESSION
@@ -129,87 +90,15 @@ export default function VoiceTextAI(): React.ReactElement {
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && connected && !muted && !ttsPlayingRef.current) {
-        e.preventDefault();
-        enableMic();
-      }
-    };
-
-    const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        disableMic();
-      }
-    };
-
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-    };
-  }, [connected, muted]);
-
   //------------------------------------------------------
   // AI SPEAK (TTS DARI BROWSER)
   //------------------------------------------------------
   const speakAI = (text: string) => {
     window.speechSynthesis.cancel();
 
-    ttsPlayingRef.current = true;
-    canRestartRecognition.current = false;
-    try {
-      recognitionRef.current?.stop();
-    } catch {}
-
-    const disabledSdkTracks: MediaStreamTrack[] = [];
-    const disabledMicTracks: MediaStreamTrack[] = [];
-    try {
-      const sdk = srsRef.current;
-      const stream = sdk?.stream as MediaStream | undefined;
-      stream?.getAudioTracks()?.forEach(t => {
-        if (t.enabled) {
-          disabledSdkTracks.push(t);
-          t.enabled = false;
-        }
-      });
-
-      const micStream = micStreamRef.current;
-      micStream?.getAudioTracks()?.forEach(t => {
-        if (t.enabled) {
-          disabledMicTracks.push(t);
-          t.enabled = false;
-        }
-      });
-    } catch {}
-
     const utter = new SpeechSynthesisUtterance(text);
     utter.lang = 'id-ID';
     utter.rate = 1;
-
-    utter.onend = () => {
-      ttsPlayingRef.current = false;
-      lastTtsEndRef.current = Date.now();
-      try {
-        disabledSdkTracks.forEach(t => (t.enabled = true));
-      } catch {}
-
-      setTimeout(() => {
-        try {
-          disabledMicTracks.forEach(t => (t.enabled = true));
-        } catch {}
-
-        canRestartRecognition.current = true;
-        if (connected && !muted && canRestartRecognition.current) {
-          try {
-            recognitionRef.current?.start();
-          } catch {}
-        }
-      }, 1500);
-    };
 
     window.speechSynthesis.speak(utter);
 
@@ -245,46 +134,36 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   // VAD + ANC (SUPAYA SUARA AI TIDAK TERTANGKAP MIC)
   //------------------------------------------------------
-  // const vad = useMicVAD({
-  //   getStream: async () => {
-  //     if (micStreamRef.current) return micStreamRef.current;
+  const vad = useMicVAD({
+    getStream: async () => {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    },
 
-  //     const s = await navigator.mediaDevices.getUserMedia({
-  //       audio: {
-  //         echoCancellation: true,
-  //         noiseSuppression: true,
-  //         autoGainControl: true,
-  //       },
-  //     });
+    onSpeechStart: () => {
+      canRestartRecognition.current = false;
+      window.speechSynthesis.cancel();
+      recognitionRef.current?.stop();
+    },
 
-  //     micStreamRef.current = s;
-  //     return s;
-  //   },
+    onSpeechEnd: () => {
+      setTimeout(() => {
+        canRestartRecognition.current = true;
+        if (!window.speechSynthesis.speaking) {
+          recognitionRef.current?.start();
+        }
+      }, 150);
+    },
+  });
 
-  //   onSpeechStart: () => {
-  //     if (ttsPlayingRef.current) return;
-  //     canRestartRecognition.current = false;
-  //     window.speechSynthesis.cancel();
-  //     try {
-  //       recognitionRef.current?.stop();
-  //     } catch {}
-  //   },
-
-  //   onSpeechEnd: () => {
-  //     setTimeout(() => {
-  //       canRestartRecognition.current = true;
-  //       if (!window.speechSynthesis.speaking && !ttsPlayingRef.current) {
-  //         try {
-  //           recognitionRef.current?.start();
-  //         } catch {}
-  //       }
-  //     }, 150);
-  //   },
-  // });
-
-  // useEffect(() => {
-  //   vadRef.current = vad;
-  // }, [vad]);
+  useEffect(() => {
+    vadRef.current = vad;
+  }, [vad]);
 
   //------------------------------------------------------
   // SPEECH RECOGNITION
@@ -300,33 +179,19 @@ export default function VoiceTextAI(): React.ReactElement {
 
     rec.onstart = () => setListening(true);
 
-    // rec.onend = () => {
-    //   setListening(false);
-    //   if (connected && !muted && canRestartRecognition.current) {
-    //     setTimeout(() => rec.start(), 200);
-    //   }
-    // };
     rec.onend = () => {
       setListening(false);
+      if (connected && !muted && canRestartRecognition.current) {
+        setTimeout(() => rec.start(), 200);
+      }
     };
 
     rec.onresult = (e: any) => {
-      // Ignore recognition results that happen during or shortly after TTS
-      if (ttsPlayingRef.current) {
-        console.debug('[Recognition] ignoring result because TTS is playing');
-        return;
-      }
-      if (lastTtsEndRef.current && Date.now() - lastTtsEndRef.current < 1500) {
-        console.debug('[Recognition] ignoring result because recent TTS end');
-        return;
-      }
       let text = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         text += e.results[i][0].transcript;
       }
       if (!text) return;
-      console.log('ini ee', e);
-      console.log('text', text);
 
       setHistory(prev => [...prev, { sender: 'user', message: text }]);
       sendChatToServer(text);
@@ -377,9 +242,6 @@ export default function VoiceTextAI(): React.ReactElement {
         recognitionRef.current?.start();
       } catch {}
     }, 400);
-
-    // start monitoring audio output from the SDK/video element
-    startAudioOutputMonitor();
   };
 
   //------------------------------------------------------
@@ -429,16 +291,6 @@ export default function VoiceTextAI(): React.ReactElement {
     }
 
     setDbSessionId(null);
-    try {
-      micStreamRef.current?.getTracks()?.forEach(t => {
-        try {
-          t.stop();
-        } catch {}
-      });
-    } catch {}
-    micStreamRef.current = null;
-
-    stopAudioOutputMonitor();
   };
 
   //------------------------------------------------------
@@ -463,109 +315,11 @@ export default function VoiceTextAI(): React.ReactElement {
       if (next) {
         recognitionRef.current?.stop();
         window.speechSynthesis.cancel();
-        try {
-          micStreamRef.current?.getAudioTracks()?.forEach(t => (t.enabled = false));
-        } catch {}
       } else {
-        try {
-          micStreamRef.current?.getAudioTracks()?.forEach(t => (t.enabled = true));
-        } catch {}
         setTimeout(() => recognitionRef.current?.start(), 400);
       }
       return next;
     });
-  };
-
-  // === Audio output monitor: mute mic when output is active ===
-  const startAudioOutputMonitor = () => {
-    stopAudioOutputMonitor();
-    try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 2048;
-      const data = new Uint8Array(analyser.frequencyBinCount);
-
-      const monitor: any = { ctx, analyser, srcNode: undefined, raf: 0 };
-      audioMonitorRef.current = monitor;
-
-      const attachSource = () => {
-        const vid = avatarVideoRef.current;
-        const sdkStream = srsRef.current?.stream as MediaStream | undefined;
-        try {
-          if (sdkStream) {
-            const src = ctx.createMediaStreamSource(sdkStream);
-            src.connect(analyser);
-            monitor.srcNode = src;
-            return true;
-          }
-
-          if (vid && (vid as any).captureStream) {
-            try {
-              const mediaStream = (vid as any).captureStream() as MediaStream;
-              if (mediaStream && mediaStream.getAudioTracks().length) {
-                const src = ctx.createMediaStreamSource(mediaStream);
-                src.connect(analyser);
-                monitor.srcNode = src;
-                return true;
-              }
-            } catch {}
-          }
-
-          return false;
-        } catch (e) {
-          return false;
-        }
-      };
-
-      attachSource();
-
-      let lastActive = 0;
-      const check = () => {
-        try {
-          analyser.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i++) {
-            const v = (data[i] - 128) / 128;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / data.length);
-          const threshold = 0.02; // tweakable
-          const now = Date.now();
-          if (rms > threshold || ttsPlayingRef.current) {
-            lastActive = now;
-            // mute mic while active
-            muteMic();
-          } else {
-            if (now - lastActive > 1500) {
-              unmuteMic();
-            }
-          }
-        } catch (e) {}
-        monitor.raf = requestAnimationFrame(check);
-      };
-
-      monitor.raf = requestAnimationFrame(check);
-    } catch (e) {
-      console.debug('audio monitor init error', e);
-    }
-  };
-
-  const stopAudioOutputMonitor = () => {
-    const m = audioMonitorRef.current;
-    if (!m) return;
-    try {
-      if (m.raf) cancelAnimationFrame(m.raf);
-    } catch {}
-    try {
-      m.srcNode?.disconnect();
-    } catch {}
-    try {
-      m.analyser?.disconnect();
-    } catch {}
-    try {
-      m.ctx?.close();
-    } catch {}
-    audioMonitorRef.current = null;
   };
 
   //------------------------------------------------------
@@ -579,10 +333,10 @@ export default function VoiceTextAI(): React.ReactElement {
       >
         <video
           ref={avatarVideoRef}
-          src={!connected ? standby : undefined}
+          src={!connected ? standby : ''}
           autoPlay
           loop
-          muted={muted || !connected}
+          muted={false}
           playsInline
           className="absolute inset-0 w-full h-full object-cover opacity-90"
         />
@@ -619,17 +373,10 @@ export default function VoiceTextAI(): React.ReactElement {
         </div>
 
         {!muted && listening && <VoiceWave />}
-        {/* {!muted && vad.userSpeaking && (
+        {!muted && vad.userSpeaking && (
           <div className="absolute bottom-36 w-full text-center z-50">
             <span className="bg-black/60 text-white px-4 py-1 rounded-full text-xs">
               Mendengarkan...
-            </span>
-          </div>
-        )} */}
-        {pttActive && (
-          <div className="absolute bottom-36 w-full text-center z-50">
-            <span className="bg-red-600 text-white px-4 py-1 rounded-full text-xs animate-pulse">
-              TALKING...
             </span>
           </div>
         )}
@@ -639,13 +386,10 @@ export default function VoiceTextAI(): React.ReactElement {
         {/* MUTE BUTTON */}
         <div className="absolute bottom-0 w-full p-6 flex justify-center z-40">
           <button
-            onMouseDown={enableMic}
-            onMouseUp={disableMic}
-            onMouseLeave={disableMic}
-            onTouchStart={enableMic}
-            onTouchEnd={disableMic}
-            className={`w-16 h-16 rounded-full text-white flex items-center justify-center transition-all
-    ${pttActive ? 'bg-red-500 scale-110' : 'bg-blue-600'}`}
+            onClick={toggleMute}
+            className={`w-14 h-14 rounded-full text-white flex items-center justify-center ${
+              muted ? 'bg-gray-600' : 'bg-blue-600'
+            }`}
           >
             {muted ? (
               <svg
